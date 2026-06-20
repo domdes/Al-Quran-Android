@@ -48,6 +48,17 @@ class QuranDownloadManager(
             "https://raw.githubusercontent.com/GovarJabbar/Quran-PNG/master/${padPage}.png"
         }
 
+        // 0. Periksa pustaka offline terlebih dahulu
+        val mushafDir = File(context.filesDir, "mushaf")
+        if (!mushafDir.exists()) mushafDir.mkdirs()
+        
+        val outputFile = File(mushafDir, "page_${mushafSource}_${padPage}.webp")
+
+        if (outputFile.exists() && outputFile.length() > 0) {
+            Log.d(tag, "Halaman $pageNumber ditemukan di pustaka offline.")
+            return@withContext Result.success(outputFile)
+        }
+
         try {
             quranDao.insertDownloadProgress(
                 DownloadProgressEntity(
@@ -68,11 +79,11 @@ class QuranDownloadManager(
 
             val inputStream: InputStream = response.body!!.byteStream()
             
-            // 1. Create target directories
-            val mushafDir = File(context.filesDir, "mushaf")
-            if (!mushafDir.exists()) mushafDir.mkdirs()
+            // 1. Create target directories (sudah dibuat di atas)
+            // val mushafDir = File(context.filesDir, "mushaf")
+            // if (!mushafDir.exists()) mushafDir.mkdirs()
             
-            val outputFile = File(mushafDir, "page_${mushafSource}_${padPage}.webp")
+            // val outputFile = File(mushafDir, "page_${mushafSource}_${padPage}.webp")
 
             // 2. Decode the downloaded stream to Bitmap
             val options = BitmapFactory.Options().apply {
@@ -367,7 +378,10 @@ class QuranDownloadManager(
                 val outputFile = File(File(context.filesDir, "mushaf"), "page_${mushafSource}_${padPage}.webp")
                 
                 if (!outputFile.exists() || outputFile.length() == 0L) {
-                    downloadPageImage(page, mushafSource)
+                    val result = downloadPageImage(page, mushafSource)
+                    if (result.isFailure) {
+                        throw Exception("Gagal mengunduh halaman $page. Proses dihentikan.")
+                    }
                 }
 
                 downloadedPages++
@@ -523,10 +537,95 @@ class QuranDownloadManager(
     }
 
     /**
+     * Downloads Tafsir & Translation text for all surahs.
+     */
+    suspend fun downloadAllTextsAndTafsirs(onProgress: (progress: Int) -> Unit = {}): Result<Unit> = withContext(Dispatchers.IO) {
+        val totalSurahs = 114
+        var downloadedSurahs = 0
+        var lastReportedProgress = -1
+        val downloadKey = "texts_all"
+
+        try {
+            if (lastReportedProgress == -1) {
+                quranDao.insertDownloadProgress(
+                    DownloadProgressEntity(
+                        downloadKey = downloadKey,
+                        type = "TEXTS_ALL",
+                        targetId = "all",
+                        status = "DOWNLOADING",
+                        progress = 0
+                    )
+                )
+            }
+
+            for (surahNumber in 1..totalSurahs) {
+                if (pausedDownloads.contains(downloadKey)) {
+                    quranDao.insertDownloadProgress(
+                        DownloadProgressEntity(
+                            downloadKey = downloadKey,
+                            type = "TEXTS_ALL",
+                            targetId = "all",
+                            status = "PAUSED",
+                            progress = ((downloadedSurahs.toFloat() / totalSurahs) * 100).toInt()
+                        )
+                    )
+                    return@withContext Result.success(Unit)
+                }
+
+                val result = downloadTafsirAndTranslation(surahNumber)
+                if (result.isSuccess) {
+                    downloadedSurahs++
+                    val totalProgress = ((downloadedSurahs.toFloat() / totalSurahs) * 100).toInt()
+                    
+                    if (totalProgress > lastReportedProgress || downloadedSurahs == totalSurahs) {
+                        quranDao.insertDownloadProgress(
+                            DownloadProgressEntity(
+                                downloadKey = downloadKey,
+                                type = "TEXTS_ALL",
+                                targetId = "all",
+                                status = if (downloadedSurahs == totalSurahs) "COMPLETED" else "DOWNLOADING",
+                                progress = totalProgress
+                            )
+                        )
+                        onProgress(totalProgress)
+                        lastReportedProgress = totalProgress
+                    }
+                } else {
+                    throw Exception("Failed to download texts for surah $surahNumber")
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(tag, "Error bulk downloading texts and tafsirs", e)
+            quranDao.insertDownloadProgress(
+                DownloadProgressEntity(
+                    downloadKey = downloadKey,
+                    type = "TEXTS_ALL",
+                    targetId = "all",
+                    status = "FAILED",
+                    progress = ((downloadedSurahs.toFloat() / totalSurahs) * 100).toInt(),
+                    errorMessage = e.localizedMessage
+                )
+            )
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Downloads Tafsir & Translation text for a surah and updates Room cache DB.
      */
     suspend fun downloadTafsirAndTranslation(surahNumber: Int): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            // 0. Periksa pustaka offline terlebih dahulu
+            val totalAyahs = surahVerseCounts[surahNumber - 1]
+            val existingTranslations = quranDao.getTranslationBySurahSync(surahNumber)
+            val existingTafsirs = quranDao.getTafsirBySurah(surahNumber)
+            
+            if (existingTranslations.size == totalAyahs && existingTafsirs.size == totalAyahs) {
+                Log.d(tag, "Tafsir & Terjemahan Surah $surahNumber sudah ada di pustaka offline.")
+                return@withContext Result.success(Unit)
+            }
+
             // 1. Fetch Indonesian Tafsir (from equran.id)
             val tafsirResponse = apiService.getKemenagTafsir(surahNumber)
             if (tafsirResponse.isSuccessful && tafsirResponse.body() != null) {
@@ -550,7 +649,6 @@ class QuranDownloadManager(
             }
 
             // 2. Fetch Translation and Arabic text for each ayah in the surah
-            val totalAyahs = surahVerseCounts[surahNumber - 1]
             val translationEntities = mutableListOf<TranslationEntity>()
             
             for (ayah in 1..totalAyahs) {

@@ -111,6 +111,16 @@ class MainActivity : ComponentActivity() {
         val app = application as QuranApplication
         handleDeepLink(intent, app)
 
+        // Reset semua unduhan yang menggantung (DOWNLOADING) menjadi PAUSED
+        // karena proses unduh (Coroutine) sudah mati saat aplikasi ditutup/direstart.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            try {
+                app.database.quranDao().pauseAllActiveDownloads()
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Failed to pause active downloads", e)
+            }
+        }
+
         setContent {
             QuranTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -252,6 +262,18 @@ fun getFullNameFromJwt(token: String): String? {
     } catch (e: Exception) {
         android.util.Log.e("MainActivity", "Error decoding JWT name", e)
         null
+    }
+}
+
+fun startQuranDownloadService(context: Context, actionStr: String, targetId: String) {
+    val intent = android.content.Intent(context, com.asyuhada.quran.data.download.QuranDownloadService::class.java).apply {
+        action = actionStr
+        putExtra(com.asyuhada.quran.data.download.QuranDownloadService.EXTRA_TARGET_ID, targetId)
+    }
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        context.startForegroundService(intent)
+    } else {
+        context.startService(intent)
     }
 }
 
@@ -517,32 +539,52 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
     var isDetailsDrawerOpen by remember { mutableStateOf<Boolean>(false) }
     var pendingAudioPlayRequest by remember { mutableStateOf<String?>(null) }
 
+    // 2. Room Database Observation
+    val settingsFlow = remember { dao.getSettingsFlow() }
+    val settings by settingsFlow.collectAsState(initial = null as com.asyuhada.quran.data.db.entities.QuranSettingsEntity?)
+
+    val bookmarksFlow = remember { dao.getBookmarksFlow() }
+    val bookmarks by bookmarksFlow.collectAsState(initial = emptyList<com.asyuhada.quran.data.db.entities.QuranBookmarkEntity>())
+
     // Save page automatically
     LaunchedEffect(Unit) {
         sharedPref.edit().putInt("last_page", currentPage).apply()
         withContext(Dispatchers.IO) {
-            val pendingDownloads = dao.getAllDownloadsSync()
-            pendingDownloads.forEach { dl ->
-                if (dl.status == "DOWNLOADING") {
-                    if (dl.type == "MUSHAF_ALL") {
-                        app.downloadManager.downloadAllMushafPages(dl.targetId)
-                    } else if (dl.type == "AUDIO_ALL") {
-                        app.downloadManager.downloadAllAudio(dl.targetId)
-                    } else if (dl.type == "AUDIO") {
-                        val targetIdInt = dl.targetId.toIntOrNull()
-                        if (targetIdInt != null) {
-                            val userId = sharedPref.getString("sync_user_id", "")?.takeIf { it.isNotBlank() } ?: "default_dev_user"
-                            val currentReciter = dao.getSettingsSync(userId)?.audioReciter ?: "Alafasy_128kbps"
-                            app.downloadManager.downloadSurahAudio(targetIdInt, currentReciter)
-                        }
-                    }
-                }
-            }
+            // Note: Now we just pause any active downloads on startup so that user can resume manually.
+            // Foreground service will handle background processing naturally without us restarting it explicitly here.
         }
     }
     
     LaunchedEffect(currentPage) {
         sharedPref.edit().putInt("last_page", currentPage).apply()
+        withContext(Dispatchers.IO) {
+            val userId = sharedPref.getString("sync_user_id", "")?.takeIf { it.isNotBlank() } ?: "default_dev_user"
+            val existing = dao.getSettingsSync(userId)
+            if (existing != null && existing.lastReadPage != currentPage) {
+                dao.insertSettings(existing.copy(
+                    lastReadPage = currentPage,
+                    isDirty = true,
+                    updatedAt = System.currentTimeMillis()
+                ))
+            } else if (existing == null) {
+                dao.insertSettings(com.asyuhada.quran.data.db.entities.QuranSettingsEntity(
+                    userId = userId,
+                    lastReadPage = currentPage,
+                    isDirty = false
+                ))
+            }
+        }
+    }
+
+    // React to settings changes from SyncWorker (e.g. read from web)
+    LaunchedEffect(settings?.lastReadPage) {
+        if (settings != null) {
+            val remotePage = settings!!.lastReadPage
+            if (remotePage > 0 && remotePage != currentPage && !settings!!.isDirty) {
+                currentPage = remotePage
+                sharedPref.edit().putInt("last_page", remotePage).apply()
+            }
+        }
     }
 
     // Monitor connectivity updates
@@ -572,13 +614,6 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
-
-    // 2. Room Database Observation
-    val settingsFlow = remember { dao.getSettingsFlow() }
-    val settings by settingsFlow.collectAsState(initial = null as com.asyuhada.quran.data.db.entities.QuranSettingsEntity?)
-
-    val bookmarksFlow = remember { dao.getBookmarksFlow() }
-    val bookmarks by bookmarksFlow.collectAsState(initial = emptyList<com.asyuhada.quran.data.db.entities.QuranBookmarkEntity>())
 
     // 3. Sync states
     var tokenInput by remember { 
@@ -2306,7 +2341,7 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                 
                                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
-                                        onClick = { coroutineScope.launch { app.downloadManager.downloadAllMushafPages(mushafSource) } },
+                                        onClick = { startQuranDownloadService(context, com.asyuhada.quran.data.download.QuranDownloadService.ACTION_DOWNLOAD_MUSHAF, mushafSource) },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFECFDF5), contentColor = Color(0xFF047857)),
                                         shape = RoundedCornerShape(8.dp)
@@ -2314,7 +2349,7 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                         Text("Unduh Seluruh Mushaf", fontSize = 11.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold)
                                     }
                                     Button(
-                                        onClick = { coroutineScope.launch { app.downloadManager.downloadAllAudio(reciter) } },
+                                        onClick = { startQuranDownloadService(context, com.asyuhada.quran.data.download.QuranDownloadService.ACTION_DOWNLOAD_AUDIO, reciter) },
                                         modifier = Modifier.weight(1f),
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF0FDF4), contentColor = Color(0xFF166534)),
                                         shape = RoundedCornerShape(8.dp)
@@ -2322,14 +2357,32 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                         Text("Unduh Seluruh Audio", fontSize = 11.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
-
-                                val activeOrPausedDownloads = allDownloads.filter {
-                                    (it.type == "MUSHAF_ALL" || it.type == "AUDIO_ALL" || (it.type == "AUDIO" && it.targetId.toIntOrNull() != null))
+                                Button(
+                                    onClick = { startQuranDownloadService(context, com.asyuhada.quran.data.download.QuranDownloadService.ACTION_DOWNLOAD_TEXTS, "all") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEFF6FF), contentColor = Color(0xFF1D4ED8)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Unduh Seluruh Teks Arab, Terjemahan & Tafsir", fontSize = 11.sp, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold)
                                 }
+
+                                val activeOrPausedDownloadsRaw = allDownloads.filter {
+                                    (it.type == "MUSHAF_ALL" || it.type == "AUDIO_ALL" || it.type == "TEXTS_ALL" || (it.type == "AUDIO" && it.targetId.toIntOrNull() != null))
+                                }
+                                
+                                val activeOrPausedDownloads = activeOrPausedDownloadsRaw.mapNotNull { dl ->
+                                    val actualProgress = when (dl.type) {
+                                        "MUSHAF_ALL" -> (getOfflineMushafCount(context, mushafSource) * 100) / 604
+                                        "AUDIO_ALL" -> (getOfflineAyahCount(context, reciter) * 100) / 6236
+                                        else -> dl.progress
+                                    }
+                                    if (actualProgress >= 100) null else dl to actualProgress
+                                }
+
                                 if (activeOrPausedDownloads.isEmpty()) {
                                     Text("Tidak ada unduhan aktif.", fontSize = 13.sp, color = Color(0xFF94A3B8), fontStyle = FontStyle.Italic)
                                 } else {
-                                    activeOrPausedDownloads.forEach { dl ->
+                                    activeOrPausedDownloads.forEach { (dl, actualProgress) ->
                                         val isPaused = dl.status == "PAUSED"
                                         val progressColor = if (isPaused) Color(0xFFF59E0B) else Color(0xFF059669)
                                         Row(
@@ -2340,13 +2393,14 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                                 val title = when (dl.type) {
                                                     "MUSHAF_ALL" -> "Mushaf Seluruh Al-Quran"
                                                     "AUDIO_ALL" -> "Audio Seluruh Al-Quran"
+                                                    "TEXTS_ALL" -> "Teks Arab & Tafsir Al-Quran"
                                                     else -> "Surah ${dl.targetId}"
                                                 }
                                                 Text(title, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1E293B))
-                                                Text(if (isPaused) "Dijeda (${dl.progress}%)" else "Mengunduh (${dl.progress}%)", fontSize = 12.sp, color = progressColor)
+                                                Text(if (isPaused) "Dijeda (${actualProgress}%)" else "Mengunduh (${actualProgress}%)", fontSize = 12.sp, color = progressColor)
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 androidx.compose.material3.LinearProgressIndicator(
-                                                    progress = { dl.progress / 100f },
+                                                    progress = { actualProgress / 100f },
                                                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                                                     color = progressColor,
                                                     trackColor = Color(0xFFE2E8F0)
@@ -2359,14 +2413,21 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                                     if (dl.type == "MUSHAF_ALL") {
                                                         if (isPaused) {
                                                             app.downloadManager.resumeBulkDownload(dl.downloadKey)
-                                                            coroutineScope.launch { app.downloadManager.downloadAllMushafPages(mushafSource) }
+                                                            startQuranDownloadService(context, com.asyuhada.quran.data.download.QuranDownloadService.ACTION_DOWNLOAD_MUSHAF, mushafSource)
                                                         } else {
                                                             app.downloadManager.pauseBulkDownload(dl.downloadKey)
                                                         }
                                                     } else if (dl.type == "AUDIO_ALL") {
                                                         if (isPaused) {
                                                             app.downloadManager.resumeBulkDownload(dl.downloadKey)
-                                                            coroutineScope.launch { app.downloadManager.downloadAllAudio(reciter) }
+                                                            startQuranDownloadService(context, com.asyuhada.quran.data.download.QuranDownloadService.ACTION_DOWNLOAD_AUDIO, reciter)
+                                                        } else {
+                                                            app.downloadManager.pauseBulkDownload(dl.downloadKey)
+                                                        }
+                                                    } else if (dl.type == "TEXTS_ALL") {
+                                                        if (isPaused) {
+                                                            app.downloadManager.resumeBulkDownload(dl.downloadKey)
+                                                            startQuranDownloadService(context, com.asyuhada.quran.data.download.QuranDownloadService.ACTION_DOWNLOAD_TEXTS, "all")
                                                         } else {
                                                             app.downloadManager.pauseBulkDownload(dl.downloadKey)
                                                         }
@@ -3093,6 +3154,18 @@ fun isNetworkAvailable(context: Context): Boolean {
     val network = cm.activeNetwork ?: return false
     val capabilities = cm.getNetworkCapabilities(network) ?: return false
     return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+}
+
+fun getOfflineMushafCount(context: Context, mushafSource: String): Int {
+    val mushafDir = File(context.filesDir, "mushaf")
+    if (!mushafDir.exists() || !mushafDir.isDirectory) return 0
+    var count = 0
+    mushafDir.walkTopDown().forEach { file ->
+        if (file.isFile && file.name.startsWith("page_${mushafSource}_") && file.name.endsWith(".webp") && file.length() > 0) {
+            count++
+        }
+    }
+    return count
 }
 
 fun getOfflineAyahCount(context: Context, reciterId: String): Int {

@@ -114,4 +114,7 @@ interface QuranDao {
 
     @Query("DELETE FROM download_progress WHERE downloadKey = :key")
     suspend fun deleteDownloadProgress(key: String)
+
+    @Query("UPDATE download_progress SET status = 'PAUSED' WHERE status = 'DOWNLOADING'")
+    suspend fun pauseAllActiveDownloads()
 }

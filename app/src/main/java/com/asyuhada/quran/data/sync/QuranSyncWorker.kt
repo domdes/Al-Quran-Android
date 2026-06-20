@@ -63,6 +63,7 @@ class QuranSyncWorker(
                 arabic_font = localSettings.arabicFont,
                 arabic_font_size = localSettings.arabicFontSize,
                 audio_reciter = localSettings.audioReciter,
+                last_read_page = localSettings.lastReadPage,
                 updated_at = formatIsoDate(localSettings.updatedAt)
             )
             
@@ -77,6 +78,7 @@ class QuranSyncWorker(
                         arabicFont = serverSettings.arabic_font ?: "Scheherazade New",
                         arabicFontSize = serverSettings.arabic_font_size ?: 32,
                         audioReciter = serverSettings.audio_reciter ?: "Alafasy_128kbps",
+                        lastReadPage = serverSettings.last_read_page ?: 1,
                         updatedAt = parseIsoDate(serverSettings.updated_at ?: ""),
                         isDirty = false
                     )
@@ -99,6 +101,7 @@ class QuranSyncWorker(
                             arabicFont = serverSettings.arabic_font ?: "Scheherazade New",
                             arabicFontSize = serverSettings.arabic_font_size ?: 32,
                             audioReciter = serverSettings.audio_reciter ?: "Alafasy_128kbps",
+                            lastReadPage = serverSettings.last_read_page ?: 1,
                             updatedAt = serverUpdatedAt,
                             isDirty = false
                         )

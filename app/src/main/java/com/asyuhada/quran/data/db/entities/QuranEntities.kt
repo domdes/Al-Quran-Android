@@ -11,6 +11,7 @@ data class QuranSettingsEntity(
     val arabicFont: String = "Scheherazade New",
     val arabicFontSize: Int = 32,
     val audioReciter: String = "Alafasy_128kbps",
+    val lastReadPage: Int = 1,
     val updatedAt: Long = System.currentTimeMillis(),
     val isDirty: Boolean = false // Set to true when updated offline, to push to server later
 )

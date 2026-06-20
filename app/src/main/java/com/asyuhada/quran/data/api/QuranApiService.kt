@@ -11,6 +11,7 @@ data class QuranSettingsDto(
     val arabic_font: String?,
     val arabic_font_size: Int?,
     val audio_reciter: String?,
+    val last_read_page: Int?,
     val updated_at: String?
 )
 

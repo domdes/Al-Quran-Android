@@ -15,7 +15,7 @@ import com.asyuhada.quran.data.db.entities.*
         TranslationEntity::class,
         DownloadProgressEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class QuranDatabase : RoomDatabase() {
