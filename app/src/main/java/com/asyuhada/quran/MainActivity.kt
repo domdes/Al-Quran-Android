@@ -574,6 +574,26 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                 ))
             }
         }
+
+        val token = sharedPref.getString("sync_token", "") ?: ""
+        val syncUserId = sharedPref.getString("sync_user_id", "") ?: ""
+        if (token.isNotBlank() && syncUserId.isNotBlank()) {
+            val syncData = androidx.work.workDataOf(
+                "KEY_AUTH_TOKEN" to "Bearer $token",
+                "KEY_USER_ID" to syncUserId
+            )
+            val syncRequest = androidx.work.OneTimeWorkRequestBuilder<com.asyuhada.quran.data.sync.QuranSyncWorker>()
+                .setInputData(syncData)
+                .setInitialDelay(5, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            
+            androidx.work.WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    "AutoSyncSettings",
+                    androidx.work.ExistingWorkPolicy.REPLACE,
+                    syncRequest
+                )
+        }
     }
 
     // React to settings changes from SyncWorker (e.g. read from web)

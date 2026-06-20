@@ -34,7 +34,7 @@ class QuranApplication : Application() {
             if (!savedUrl.endsWith("/")) savedUrl += "/"
             return savedUrl
         }
-        return "https://www.asyuhada-jaya.org/"
+        return "https://quran.asyuhada-jaya.org/"
     }
 
     fun updateApiServiceUrl(newUrl: String) {
