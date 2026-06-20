@@ -843,7 +843,7 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
     var activeTafsirIbnKathirAr by remember { mutableStateOf("") }
     var activeArabicText by remember { mutableStateOf("") }
     var isDetailsLoading by remember { mutableStateOf(false) }
-    var activeTab by remember { mutableStateOf("terjemahan") }
+    var activeTab by remember { mutableStateOf("tafsir_kemenag") }
 
     LaunchedEffect(pendingAudioPlayRequest) {
         val req = pendingAudioPlayRequest
@@ -1775,11 +1775,22 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                             fontSize = fontSizeVal.sp,
                                             lineHeight = (fontSizeVal * 2.2f).sp, // Relaxed line spacing
                                             fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF272117),
+                                            color = Color(0xFF1E3A8A), // Dark blue
                                             textAlign = TextAlign.Right,
                                             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
                                             fontFamily = selectedFontFamily
                                         )
+                                        
+                                        // Terjemahan right below Arabic
+                                        if (activeTranslationText.isNotEmpty()) {
+                                            Text(
+                                                text = activeTranslationText,
+                                                fontSize = 15.sp,
+                                                lineHeight = 22.sp,
+                                                color = Color(0xFF475569),
+                                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                            )
+                                        }
                                     }
                                 }
 
@@ -1884,7 +1895,6 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     val tabs = listOf(
-                                        "terjemahan" to "Terjemahan",
                                         "tafsir_kemenag" to "Tafsir Kemenag",
                                         "tafsir_jalalayn" to "Tafsir Jalalayn",
                                         "tafsir_ibnkathir" to "Ibnu Katsir (Ar)"
@@ -1922,7 +1932,6 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                     }
                                 } else {
                                     val rawContentText = when (activeTab) {
-                                        "terjemahan" -> activeTranslationText
                                         "tafsir_kemenag" -> activeTafsirKemenag
                                         "tafsir_jalalayn" -> activeTafsirJalalayn
                                         else -> activeTafsirIbnKathirAr
