@@ -70,20 +70,25 @@ class QuranSyncWorker(
             val response = apiService.updateSettings(bearerToken, dto)
             if (response.isSuccessful && response.body() != null) {
                 val serverSettings = response.body()!!
+                val currentLocalSettings = quranDao.getSettingsSync(userId)
+                
+                // Only mark as NOT dirty if the user hasn't made new changes while uploading!
+                val isStillDirty = currentLocalSettings != null && currentLocalSettings.updatedAt > localSettings.updatedAt
+                
                 quranDao.insertSettings(
                     QuranSettingsEntity(
                         userId = userId,
-                        mushafSource = serverSettings.mushaf_source ?: "standard",
-                        customUrlTemplate = serverSettings.custom_url_template ?: "",
-                        arabicFont = serverSettings.arabic_font ?: "Scheherazade New",
-                        arabicFontSize = serverSettings.arabic_font_size ?: 32,
-                        audioReciter = serverSettings.audio_reciter ?: "Alafasy_128kbps",
-                        lastReadPage = serverSettings.last_read_page ?: 1,
-                        updatedAt = parseIsoDate(serverSettings.updated_at ?: ""),
-                        isDirty = false
+                        mushafSource = if (isStillDirty) currentLocalSettings!!.mushafSource else (serverSettings.mushaf_source ?: "standard"),
+                        customUrlTemplate = if (isStillDirty) currentLocalSettings!!.customUrlTemplate else (serverSettings.custom_url_template ?: ""),
+                        arabicFont = if (isStillDirty) currentLocalSettings!!.arabicFont else (serverSettings.arabic_font ?: "Scheherazade New"),
+                        arabicFontSize = if (isStillDirty) currentLocalSettings!!.arabicFontSize else (serverSettings.arabic_font_size ?: 32),
+                        audioReciter = if (isStillDirty) currentLocalSettings!!.audioReciter else (serverSettings.audio_reciter ?: "Alafasy_128kbps"),
+                        lastReadPage = if (isStillDirty) currentLocalSettings!!.lastReadPage else (serverSettings.last_read_page ?: 1),
+                        updatedAt = if (isStillDirty) currentLocalSettings!!.updatedAt else parseIsoDate(serverSettings.updated_at ?: ""),
+                        isDirty = isStillDirty
                     )
                 )
-                Log.d(tag, "Local settings synced and uploaded to server.")
+                Log.d(tag, "Local settings synced and uploaded to server. isStillDirty=$isStillDirty")
             }
         } else {
             // Fetch newest settings from server
