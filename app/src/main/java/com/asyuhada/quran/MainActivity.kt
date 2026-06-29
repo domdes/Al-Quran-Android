@@ -540,7 +540,28 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
     val context = LocalContext.current
     val dao = app.database.quranDao()
     val sharedPref = remember { context.getSharedPreferences("quran_prefs", Context.MODE_PRIVATE) }
+    
+    // 6. Pagination states
     val coroutineScope = rememberCoroutineScope()
+    
+    // 7. Calibration states
+    var isCalibrationMode by remember { mutableStateOf(false) }
+    var calibOffsetX by remember { mutableStateOf(sharedPref.getFloat("calib_offset_x", 0f)) }
+    var calibOffsetY by remember { mutableStateOf(sharedPref.getFloat("calib_offset_y", 0f)) }
+    var calibScaleW by remember { mutableStateOf(sharedPref.getFloat("calib_scale_w", 1f)) }
+    var calibScaleH by remember { mutableStateOf(sharedPref.getFloat("calib_scale_h", 1f)) }
+
+    // Save calibration lambda
+    val saveCalibration = {
+        sharedPref.edit()
+            .putFloat("calib_offset_x", calibOffsetX)
+            .putFloat("calib_offset_y", calibOffsetY)
+            .putFloat("calib_scale_w", calibScaleW)
+            .putFloat("calib_scale_h", calibScaleH)
+            .apply()
+        isCalibrationMode = false
+        Toast.makeText(context, "Kalibrasi disimpan", Toast.LENGTH_SHORT).show()
+    }
 
     val surahInfoMap = remember {
         try {
@@ -674,6 +695,27 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
             userIdInput = sharedPref.getString("sync_user_id", "") ?: ""
         }
     }
+
+    var userRole by remember { mutableStateOf(sharedPref.getString("user_role", "") ?: "") }
+    
+    LaunchedEffect(tokenInput) {
+        if (tokenInput.isNotBlank()) {
+            try {
+                val response = app.apiService.getProfile("Bearer $tokenInput")
+                if (response.isSuccessful && response.body() != null) {
+                    val role = response.body()?.role ?: ""
+                    sharedPref.edit().putString("user_role", role).apply()
+                    userRole = role
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        } else {
+            userRole = ""
+            sharedPref.edit().putString("user_role", "").apply()
+        }
+    }
+
 
     // 4. Audio Playback and Highlights states
     var downloadState by remember { mutableStateOf("IDLE") }
@@ -1141,16 +1183,22 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                 val boxW = if (isTajweed) box.w * 0.98373f else box.w
                                 val boxH = if (isTajweed) box.h * 0.89941f else box.h
 
-                                val left = canvasWidth * (boxX / 900f)
-                                val top = canvasHeight * (boxY / 1437f)
-                                val width = canvasWidth * (boxW / 900f)
-                                val height = canvasHeight * (boxH / 1437f)
+                                val finalX = boxX + calibOffsetX
+                                val finalY = boxY + calibOffsetY
+                                val finalW = boxW * calibScaleW
+                                val finalH = boxH * calibScaleH
+
+                                val left = canvasWidth * (finalX / 900f)
+                                val top = canvasHeight * (finalY / 1437f)
+                                val width = canvasWidth * (finalW / 900f)
+                                val height = canvasHeight * (finalH / 1437f)
 
                                 val ayahKey = "$surah:$ayah"
                                 val isCurrentPlaying = currentPlayingAyah == ayahKey
                                 val isSelected = selectedAyah == ayahKey
 
                                 val overlayColor = when {
+                                    isCalibrationMode -> Color.Red.copy(alpha = 0.2f)
                                     isCurrentPlaying -> Color(0xFFFBBF24).copy(alpha = 0.35f)
                                     isSelected -> Color(0xFF059669).copy(alpha = 0.2f)
                                     else -> Color.Transparent
@@ -2356,11 +2404,98 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                 Spacer(modifier = Modifier.height(24.dp))
                             }
                         }
+            }
+
+            // H. Calibration UI (Floating Panel)
+            if (isCalibrationMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                        .zIndex(100f),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Kalibrasi Koordinat (Super Admin)", fontWeight = FontWeight.Bold, color = Color(0xFF059669))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Offset X: ", modifier = Modifier.width(80.dp), fontSize = 12.sp)
+                                Slider(
+                                    value = calibOffsetX,
+                                    onValueChange = { calibOffsetX = it },
+                                    valueRange = -50f..50f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(String.format("%.1f", calibOffsetX), modifier = Modifier.width(40.dp), fontSize = 12.sp)
+                            }
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Offset Y: ", modifier = Modifier.width(80.dp), fontSize = 12.sp)
+                                Slider(
+                                    value = calibOffsetY,
+                                    onValueChange = { calibOffsetY = it },
+                                    valueRange = -50f..50f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(String.format("%.1f", calibOffsetY), modifier = Modifier.width(40.dp), fontSize = 12.sp)
+                            }
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Scale W: ", modifier = Modifier.width(80.dp), fontSize = 12.sp)
+                                Slider(
+                                    value = calibScaleW,
+                                    onValueChange = { calibScaleW = it },
+                                    valueRange = 0.5f..1.5f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(String.format("%.2f", calibScaleW), modifier = Modifier.width(40.dp), fontSize = 12.sp)
+                            }
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Scale H: ", modifier = Modifier.width(80.dp), fontSize = 12.sp)
+                                Slider(
+                                    value = calibScaleH,
+                                    onValueChange = { calibScaleH = it },
+                                    valueRange = 0.5f..1.5f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(String.format("%.2f", calibScaleH), modifier = Modifier.width(40.dp), fontSize = 12.sp)
+                            }
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(onClick = { 
+                                    isCalibrationMode = false
+                                    calibOffsetX = sharedPref.getFloat("calib_offset_x", 0f)
+                                    calibOffsetY = sharedPref.getFloat("calib_offset_y", 0f)
+                                    calibScaleW = sharedPref.getFloat("calib_scale_w", 1f)
+                                    calibScaleH = sharedPref.getFloat("calib_scale_h", 1f)
+                                }) {
+                                    Text("Batal", color = Color.Gray)
+                                }
+                                Button(
+                                    onClick = { saveCalibration() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                                ) {
+                                    Text("Simpan")
+                                }
+                            }
+                        }
                     }
                 }
             }
-
+            
             @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
             // J. Settings Dialog (Supabase + Offline Reciter + Mushaf toggle)
             if (showSettingsDialog) {
                 var syncStatus by remember { mutableStateOf("IDLE") }
@@ -2383,6 +2518,19 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                             .verticalScroll(rememberScrollState())
                     ) {
                         Text("Pengaturan & Sinkronisasi", fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, color = Color(0xFF0F172A))
+                        
+                        if (userRole == "super_admin") {
+                            Button(
+                                onClick = {
+                                    isCalibrationMode = true
+                                    showSettingsDialog = false
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Mode Kalibrasi Koordinat (Super Admin)")
+                            }
+                        }
                         
                         // 1. Akun & Sinkronisasi
                         Card(

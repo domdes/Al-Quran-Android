@@ -29,6 +29,12 @@ data class SyncBookmarksRequest(
     val bookmarks: List<QuranBookmarkDto>
 )
 
+data class QuranProfileDto(
+    val role: String?,
+    val display_name: String?,
+    val avatar_url: String?
+)
+
 data class KemenagTafsirResponse(
     val code: Int,
     val message: String,
@@ -119,6 +125,12 @@ interface QuranApiService {
         @Header("Authorization") token: String,
         @Body request: SyncBookmarksRequest
     ): Response<List<QuranBookmarkDto>>
+
+    @GET("api/quran/profile")
+    suspend fun getProfile(
+        @Header("Authorization") token: String
+    ): Response<QuranProfileDto>
+
 
     // --- EXTERNAL QURAN API ENDPOINTS ---
 
