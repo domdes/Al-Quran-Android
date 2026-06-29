@@ -355,6 +355,30 @@ val SURAH_NAMES = listOf(
     "Al-Lahab", "Al-Ikhlas", "Al-Falaq", "An-Nas"
 )
 
+val SURAH_NAMES_ARABIC = listOf(
+    "الفاتحة", "البقرة", "آل عمران", "النساء", "المائدة", "الأنعام", "الأعراف", "الأنفال", "التوبة", "يونس",
+    "هود", "يوسف", "الرعد", "إبراهيم", "الحجر", "النحل", "الإسراء", "الكهف", "مريم", "طه",
+    "الأنبياء", "الحج", "المؤمنون", "النور", "الفرقان", "الشعراء", "النمل", "القصص", "العنكبوت", "الروم",
+    "لقمان", "السجدة", "الأحزاب", "سبأ", "فاطر", "يس", "الصافات", "ص", "الزمر", "غافر",
+    "فصلت", "الشورى", "الزخرف", "الدخان", "الجاثية", "الأحقاف", "محمد", "الفتح", "الحجرات", "ق",
+    "الذاريات", "الطور", "النجم", "القمر", "الرحمن", "الواقعة", "الحديد", "المجادلة", "الحشر", "الممتحنة",
+    "الصف", "الجمعة", "المنافقون", "التغابن", "الطلاق", "التحريم", "الملك", "القلم", "الحاقة", "المعارج",
+    "نوح", "الجن", "المزمل", "المدثر", "القيامة", "الإنسان", "المرسلات", "النبأ", "النازعات", "عبس",
+    "التكوير", "الانفطار", "المطففين", "الانشقاق", "البروج", "الطارق", "الأعلى", "الغاشية", "الفجر", "البلد",
+    "الشمس", "الليل", "الضحى", "الشرح", "التين", "العلق", "القدر", "البينة", "الزلزلة", "العاديات",
+    "القارعة", "التكاثر", "العصر", "الهمزة", "الفيل", "قريش", "الماعون", "الكوثر", "الكافرون", "النصر",
+    "المسد", "الإخلاص", "الفلق", "الناس"
+)
+
+val JUZ_START_INFO = listOf(
+    Pair("Al-Fatihah", "1"), Pair("Al-Baqarah", "142"), Pair("Al-Baqarah", "253"), Pair("Ali 'Imran", "93"), Pair("An-Nisa'", "24"),
+    Pair("An-Nisa'", "148"), Pair("Al-Ma'idah", "82"), Pair("Al-An'am", "111"), Pair("Al-A'raf", "88"), Pair("Al-Anfal", "41"),
+    Pair("At-Taubah", "93"), Pair("Hud", "6"), Pair("Yusuf", "53"), Pair("Al-Hijr", "1"), Pair("Al-Isra'", "1"),
+    Pair("Al-Kahf", "75"), Pair("Al-Anbiya'", "1"), Pair("Al-Mu'minun", "1"), Pair("Al-Furqan", "21"), Pair("An-Naml", "56"),
+    Pair("Al-Ankabut", "46"), Pair("Al-Ahzab", "31"), Pair("Yasin", "28"), Pair("Az-Zumar", "32"), Pair("Fushshilat", "47"),
+    Pair("Al-Ahqaf", "1"), Pair("Adz-Dzariyat", "31"), Pair("Al-Mujadilah", "1"), Pair("Al-Mulk", "1"), Pair("An-Naba'", "1")
+)
+
 val SURAH_VERSES = listOf(
     7, 286, 200, 176, 120, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128, 111, 110, 98, 135,
     112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30, 73, 54, 45, 83, 182, 88, 75, 85,
@@ -678,15 +702,27 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
     LaunchedEffect(currentPage, mushafSource, isOnline) {
         // Load Coords
         withContext(Dispatchers.IO) {
+            if (!mushafDir.exists()) {
+                mushafDir.mkdirs()
+            }
+            var loadedFromCache = false
             if (coordsFile.exists() && coordsFile.length() > 0) {
                 try {
                     val jsonString = coordsFile.readText()
                     val response = Gson().fromJson(jsonString, PageCoordinatesResponse::class.java)
-                    coordsMap = response.coords
+                    if (response?.coords != null) {
+                        coordsMap = response.coords
+                        loadedFromCache = true
+                    } else {
+                        coordsMap = emptyMap()
+                    }
                 } catch (e: Exception) {
-                    coordsMap = emptyMap()
+                    android.util.Log.e("MainActivity", "Corrupt coords cache, deleting...", e)
+                    coordsFile.delete()
                 }
-            } else if (isOnline) {
+            }
+            
+            if (!loadedFromCache && isOnline) {
                 try {
                     val baseUrl = (context.applicationContext as QuranApplication).getPortalBaseUrl()
                     val padPageStr = String.format("%03d", currentPage)
@@ -696,15 +732,21 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                     if (response.isSuccessful && response.body != null) {
                         val jsonString = response.body!!.string()
                         val res = Gson().fromJson(jsonString, PageCoordinatesResponse::class.java)
-                        coordsMap = res.coords
-                        val fos = FileOutputStream(coordsFile)
-                        fos.write(jsonString.toByteArray())
-                        fos.flush()
-                        fos.close()
+                        if (res?.coords != null) {
+                            coordsMap = res.coords
+                            val fos = FileOutputStream(coordsFile)
+                            fos.write(jsonString.toByteArray())
+                            fos.flush()
+                            fos.close()
+                        } else {
+                            coordsMap = emptyMap()
+                        }
                     }
                 } catch (e: Exception) {
                     coordsMap = emptyMap()
                 }
+            } else if (!loadedFromCache) {
+                coordsMap = emptyMap()
             }
         }
 
@@ -733,6 +775,17 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                         val options = BitmapFactory.Options().apply { inJustDecodeBounds = false }
                         val bitmap = BitmapFactory.decodeStream(inputStream, null, options)
                         imageBitmap = bitmap?.asImageBitmap()
+                        
+                        try {
+                            if (bitmap != null) {
+                                val fos = FileOutputStream(imageFile)
+                                bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP, 80, fos)
+                                fos.flush()
+                                fos.close()
+                            }
+                        } catch(e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to save image locally", e)
+                        }
                     }
                 } catch (e: Exception) {
                     imageBitmap = null
@@ -1479,49 +1532,108 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                             }
                         }
 
-                        // Render 114 Surahs directly without search bar
+                        // Search Bar
+                        OutlinedTextField(
+                            value = surahSearchQuery,
+                            onValueChange = { surahSearchQuery = it },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            placeholder = { Text("Cari Surah...") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search", tint = Color.Gray, modifier = Modifier.size(20.dp)) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF059669),
+                                unfocusedBorderColor = Color.LightGray,
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        // Render Filtered Surahs
+                        val filteredSurahs = (0 until 114).filter { index ->
+                            SURAH_NAMES[index].contains(surahSearchQuery, ignoreCase = true)
+                        }
+
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            items(114) { index ->
-                                val sNum = index + 1
-                                val sNameAr = SurahDataHelper.SURAH_NAMES_AR[index]
-                                val sPage = SURAH_START_PAGES[index]
+                            items(filteredSurahs.size) { index ->
+                                val realIndex = filteredSurahs[index]
+                                val sNum = realIndex + 1
+                                val sNameLatin = SURAH_NAMES[realIndex]
+                                val sNameArabic = SURAH_NAMES_ARABIC.getOrElse(realIndex) { "" }
+                                val sPage = SURAH_START_PAGES[realIndex]
+                                val surahExtra = SurahExtraInfoHelper.SURAH_EXTRA_MAP[sNum]
+                                val translation = surahInfoMap[sNum]?.translation ?: ""
+                                
+                                val activeSurahIdx = SURAH_START_PAGES.reduceIndexed { idx, acc, curr ->
+                                    if (currentPage >= curr) idx else acc
+                                }
+                                val isActive = realIndex == activeSurahIdx
 
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isActive) Color(0xFFECFDF5) else Color.Transparent)
                                         .clickable {
                                             isLeftDrawerOpen = false
                                             currentPage = sPage
                                             selectedAyah = null
+                                            surahSearchQuery = ""
                                         }
                                         .padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Left Column: Halaman (Rata Kiri)
-                                    Text(
-                                        text = toArabicNumerals(sPage),
-                                        fontSize = 17.sp,
-                                        fontFamily = AmiriFontFamily,
-                                        fontWeight = FontWeight.Normal,
-                                        color = Color(0xFF272117),
-                                        modifier = Modifier.weight(1f),
-                                        textAlign = TextAlign.Left
-                                    )
+                                    // Number Badge
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isActive) Color(0xFF059669) else Color(0xFFE5E7EB)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = sNum.toString(),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isActive) Color.White else Color(0xFF4B5563)
+                                        )
+                                    }
                                     
-                                    // Right Column: Nomor. Nama Surah (Rata Kanan)
-                                    Text(
-                                        text = "${toArabicNumerals(sNum)}. $sNameAr",
-                                        fontSize = 17.sp,
-                                        fontFamily = AmiriFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF272117),
-                                        modifier = Modifier.weight(1f),
-                                        textAlign = TextAlign.Right
-                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = sNameLatin,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isActive) Color(0xFF065F46) else Color(0xFF272117)
+                                        )
+                                        if (translation.isNotEmpty()) {
+                                            Text(
+                                                text = translation,
+                                                fontSize = 11.sp,
+                                                color = if (isActive) Color(0xFF059669) else Color.Gray,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                    
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = sNameArabic,
+                                            fontSize = 18.sp,
+                                            fontFamily = AmiriFontFamily,
+                                            color = if (isActive) Color(0xFF065F46) else Color(0xFF272117)
+                                        )
+                                        Text(
+                                            text = "Hlm $sPage",
+                                            fontSize = 11.sp,
+                                            color = if (isActive) Color(0xFF059669) else Color.Gray
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1565,48 +1677,78 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                         Spacer(modifier = Modifier.height(12.dp))
 
                         LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             items(30) { index ->
                                 val juzNum = index + 1
-                                val juzNameAr = SurahDataHelper.JUZ_NAMES_AR[index]
                                 val juzPage = SurahDataHelper.JUZ_START_PAGES[index]
+                                val startInfo = JUZ_START_INFO.getOrElse(index) { Pair("", "") }
+                                
+                                val activeJuzIdx = SurahDataHelper.JUZ_START_PAGES.reduceIndexed { idx, acc, curr ->
+                                    if (currentPage >= curr) idx else acc
+                                }
+                                val isActive = index == activeJuzIdx
 
-                                Row(
+                                Card(
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isActive) Color(0xFFF0FDF4) else Color.White
+                                    ),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 2.dp else 1.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
                                         .clickable {
                                             isRightDrawerOpen = false
                                             currentPage = juzPage
                                             selectedAyah = null
                                         }
-                                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    // Left Column: Halaman (Rata Kiri)
-                                    Text(
-                                        text = toArabicNumerals(juzPage),
-                                        fontSize = 17.sp,
-                                        fontFamily = AmiriFontFamily,
-                                        fontWeight = FontWeight.Normal,
-                                        color = Color(0xFF272117),
-                                        textAlign = TextAlign.Left,
-                                        modifier = Modifier.wrapContentWidth()
-                                    )
-                                    
-                                    // Right Column: Nomor. Juz Nama (Rata Kanan)
-                                    Text(
-                                        text = "${toArabicNumerals(juzNum)}. $juzNameAr",
-                                        fontSize = 17.sp,
-                                        fontFamily = AmiriFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF272117),
-                                        textAlign = TextAlign.Right,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Left side: Juz Badge
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .background(if (isActive) Color(0xFF059669) else Color(0xFFF3EFE9), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = juzNum.toString(),
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isActive) Color.White else Color(0xFF272117)
+                                            )
+                                        }
+                                        
+                                        Spacer(modifier = Modifier.width(16.dp))
+                                        
+                                        // Middle: Juz Name & Start Info
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Juz $juzNum",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp,
+                                                color = if (isActive) Color(0xFF065F46) else Color(0xFF272117)
+                                            )
+                                            Text(
+                                                text = "Mulai: ${startInfo.first} ayat ${startInfo.second}",
+                                                fontSize = 12.sp,
+                                                color = if (isActive) Color(0xFF059669) else Color.Gray
+                                            )
+                                        }
+                                        
+                                        // Right side: Page Number
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(
+                                                text = "Hlm $juzPage",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isActive) Color(0xFF059669) else Color(0xFF272117)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2119,19 +2261,8 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                 }
             }
 
-            // I. Surah Info Top Drawer
-            AnimatedVisibility(
-                visible = showSurahInfoDialog && currentScreen == "main",
-                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 8.dp)
-                    .widthIn(max = 480.dp)
-                    .fillMaxWidth(0.75f)
-                    .zIndex(15f)
-            ) {
+            @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+            if (showSurahInfoDialog) {
                 val activeSurahIdx = SURAH_START_PAGES.reduceIndexed { idx, acc, curr ->
                     if (currentPage >= curr) idx else acc
                 }
@@ -2139,64 +2270,90 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                 val surahExtra = SurahExtraInfoHelper.SURAH_EXTRA_MAP[surahNum]
 
                 if (surahExtra != null) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFCF8F2)),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    val sNameArabic = SURAH_NAMES_ARABIC.getOrElse(activeSurahIdx) { "" }
+                    androidx.compose.material3.ModalBottomSheet(
+                        onDismissRequest = { showSurahInfoDialog = false },
+                        containerColor = Color(0xFFFBF7F0),
+                        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
                     ) {
                         Column(
                             modifier = Modifier
-                                .padding(16.dp)
-                                .heightIn(max = 320.dp)
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 8.dp)
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Surah ${surahExtra.namaLatin}",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = Color(0xFF272117)
-                                )
-                                IconButton(
-                                    onClick = { showSurahInfoDialog = false },
-                                    modifier = Modifier.size(24.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Tutup",
-                                        tint = Color.Gray,
-                                        modifier = Modifier.size(16.dp)
+                                Column {
+                                    Text(
+                                        text = "Surah ${surahExtra.namaLatin}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 22.sp,
+                                        color = Color(0xFF272117)
                                     )
+                                    val t = surahInfoMap[surahNum]?.translation ?: ""
+                                    if (t.isNotEmpty()) {
+                                        Text(
+                                            text = t,
+                                            fontSize = 14.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = sNameArabic,
+                                    fontSize = 28.sp,
+                                    fontFamily = AmiriFontFamily,
+                                    color = Color(0xFF065F46)
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(24.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFFD8C29D), modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = "Tempat", fontSize = 11.sp, color = Color.Gray)
+                                    Text(text = surahExtra.tempatTurun, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF272117))
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.FormatListNumbered, contentDescription = null, tint = Color(0xFFD8C29D), modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = "Ayat", fontSize = 11.sp, color = Color.Gray)
+                                    Text(text = "${surahExtra.jumlahAyat}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF272117))
+                                }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.History, contentDescription = null, tint = Color(0xFFD8C29D), modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(text = "Urutan Turun", fontSize = 11.sp, color = Color.Gray)
+                                    Text(text = "Ke-${surahExtra.urutanTurun}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF272117))
                                 }
                             }
                             
-                            Spacer(modifier = Modifier.height(6.dp))
-                            
-                            Text(
-                                text = "Surat ${surahExtra.tempatTurun}, ${surahExtra.jumlahAyat} ayat, urutan turun ke-${surahExtra.urutanTurun}",
-                                color = Color.Red,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            
-                            Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(24.dp))
+                            HorizontalDivider(color = Color.LightGray.copy(alpha = 0.5f))
+                            Spacer(modifier = Modifier.height(16.dp))
                             
                             Column(
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .heightIn(max = 300.dp)
                                     .verticalScroll(rememberScrollState())
                             ) {
                                 val localDesc = surahInfoMap[surahNum]?.description ?: surahExtra.deskripsi
                                 Text(
                                     text = localDesc,
-                                    color = Color.Black,
-                                    fontSize = 12.sp,
-                                    lineHeight = 18.sp
+                                    color = Color(0xFF4B5563),
+                                    fontSize = 14.sp,
+                                    lineHeight = 22.sp
                                 )
+                                Spacer(modifier = Modifier.height(24.dp))
                             }
                         }
                     }
@@ -2644,16 +2801,30 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
             }
 
             // K. Bookmarks Dialog
+            @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
             if (showBookmarksDialog) {
-                AlertDialog(
+                androidx.compose.material3.ModalBottomSheet(
                     onDismissRequest = { showBookmarksDialog = false },
-                    title = { Text("Daftar Penanda (Bookmark)", fontWeight = FontWeight.Bold) },
-                    text = {
+                    containerColor = Color(0xFFFBF7F0),
+                    sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = false)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .padding(bottom = 24.dp)
+                    ) {
+                        Text(
+                            text = "Daftar Penanda (Bookmark)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                            color = Color(0xFF272117),
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                        
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 400.dp)
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)
                         ) {
                             items(10) { index ->
                                 val slotIndex = index + 1
@@ -2674,11 +2845,12 @@ fun MainScreen(app: QuranApplication, deepLinkTrigger: Int, modifier: Modifier =
                                 val parsed = parseBookmarkLabel(b?.label, slotIndex)
                                 val isRealBookmark = b != null && parsed.hasRealBookmark
 
-                                Row(
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Row(

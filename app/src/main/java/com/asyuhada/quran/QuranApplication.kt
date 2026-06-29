@@ -28,12 +28,7 @@ class QuranApplication : Application() {
     }
 
     fun getPortalBaseUrl(): String {
-        val sharedPref = getSharedPreferences("quran_prefs", Context.MODE_PRIVATE)
-        var savedUrl = sharedPref.getString("portal_server_url", "") ?: ""
-        if (savedUrl.isNotBlank()) {
-            if (!savedUrl.endsWith("/")) savedUrl += "/"
-            return savedUrl
-        }
+        // Force use production server as requested
         return "https://quran.asyuhada-jaya.org/"
     }
 
